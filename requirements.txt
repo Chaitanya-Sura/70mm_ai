@@ -1,0 +1,8 @@
+# 70MM AI — Group 2: Script Intelligence Engine
+# Requirements
+
+flask==3.1.0
+flask-cors==6.0.5
+google-genai==2.25.0
+python-dotenv==1.2.2
+pymupdf==1.25.5

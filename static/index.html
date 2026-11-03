@@ -18,7 +18,7 @@
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
             <rect width="32" height="32" rx="8" fill="url(#logoGrad)"/>
             <path d="M8 10h16M8 16h10M8 22h13" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-            <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#a855f7"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+            <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#00E2FB"/><stop offset="1" stop-color="#00B3B5"/></linearGradient></defs>
           </svg>
         </div>
         <div>
@@ -150,8 +150,9 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
           <div class="panel-header">
             <h2 class="panel-title">Generated Screenplay</h2>
             <div class="action-row">
-              <button class="btn-sm" onclick="copyOutput('screenplayOutput')">📋 Copy</button>
-              <button class="btn-sm" onclick="downloadText('screenplayOutput', 'screenplay.txt')">⬇ Download</button>
+              <button class="btn-sm" onclick="copyOutput('screenplayOutput')" title="Copy entire merged screenplay (including all continued scenes)">📋 Copy All</button>
+              <button class="btn-sm" onclick="downloadText('screenplayOutput', 'screenplay.txt')" title="Download entire merged screenplay">⬇ Download All</button>
+              <button class="btn-sm btn-ghost" id="mergeBtn" style="display: none;" onclick="mergeAllScenesIntoEditor()" title="Merge all continued scene blocks into the main screenplay box">🔗 Merge All</button>
             </div>
           </div>
           <div class="screenplay-output" id="screenplayOutput">
@@ -161,10 +162,23 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
             </div>
           </div>
 
-          <!-- Inline AI assist -->
+          <!-- Separate container for Continued Scenes -->
+          <div id="continuedScenesContainer" class="continued-scenes-container"></div>
+
+          <!-- Active Cached Directive for Next Scene -->
+          <div id="directiveContainer" class="directive-container" style="display: none;">
+            <div class="directive-chip">
+              <span class="directive-icon">🎯</span>
+              <span class="directive-label">Cached Directive for Next Scene:</span>
+              <span class="directive-val" id="directiveVal"></span>
+              <button type="button" class="directive-clear-btn" onclick="clearCachedDirective()" title="Clear cached directive">✕</button>
+            </div>
+          </div>
+
+          <!-- Inline AI assist Directive Bar -->
           <div class="assist-bar">
-            <input type="text" id="assistInput" class="assist-input" placeholder='AI assist: "Make dialogue more natural" / "Add more tension" / "Convert scene to night"' />
-            <button class="btn-sm btn-assist" onclick="scriptAssist()">Apply</button>
+            <input type="text" id="assistInput" class="assist-input" placeholder='Directive for next scene: "Make dialogue tenser" / "Add car chase" / "Set in heavy rain"' />
+            <button class="btn-sm btn-assist" id="assistBtn" onclick="applyAssistDirective()">Apply</button>
           </div>
           <div class="panel-actions-right">
             <button class="btn-secondary" onclick="continueScene()" id="continueBtn">
@@ -213,31 +227,47 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
             </label>
           </div>
           <div class="form-group">
-            <label class="form-label">Target Language</label>
-            <select id="targetLang" class="lang-select full-width">
-              <option value="Tenglish">🇮🇳 Tenglish (Telugu + English)</option>
-              <option value="Hinglish">🇮🇳 Hinglish (Hindi + English)</option>
+            <div class="label-row-between">
+              <label class="form-label">Select Character (from Screenplay)</label>
+              <button type="button" class="btn-xs-link" onclick="populateCharacterDropdown()" title="Rescan screenplay for characters">🔄 Rescan Script</button>
+            </div>
+            <select id="charSelectLang" class="lang-select full-width" onchange="onCharacterSelected(this.value)">
+              <option value="">-- Select Character / Narrator --</option>
+              <option value="ALL">👥 ALL CHARACTERS (Whole Script)</option>
+              <option value="NARRATOR">🎙️ NARRATOR (Scene Action & Voiceover)</option>
             </select>
           </div>
+
           <div class="form-group">
-            <label class="form-label">Character Name <span class="optional">(optional)</span></label>
-            <input type="text" id="charNameLang" class="form-input" placeholder="e.g. Arjun" />
+            <label class="form-label">Target Standard Language</label>
+            <select id="targetLang" class="lang-select full-width">
+              <option value="Standard English" selected>🇬🇧 Standard English (Convert non-standard to standard)</option>
+              <option value="Tenglish">🇮🇳 Tenglish (Telugu + English Code-switch)</option>
+              <option value="Hinglish">🇮🇳 Hinglish (Hindi + English Code-switch)</option>
+              <option value="Standard Telugu">🇮🇳 Standard Telugu</option>
+              <option value="Standard Hindi">🇮🇳 Standard Hindi</option>
+            </select>
           </div>
+
           <div class="form-group">
             <label class="form-label">Character Personality <span class="optional">(optional)</span></label>
-            <input type="text" id="charPersonality" class="form-input" placeholder="e.g. street-smart, sarcastic, uses slang" />
+            <input type="text" id="charPersonality" class="form-input" placeholder="e.g. street-smart, intense, dramatic" />
           </div>
+
           <div class="form-group">
-            <label class="form-label">Dialogue to Convert</label>
+            <div class="label-row-between">
+              <label class="form-label">Selected Character Dialogues</label>
+              <span id="charDialogueCount" class="badge-mini" style="display: none;">0 lines</span>
+            </div>
             <textarea id="dialogueInput" class="form-textarea"
               ondragover="handleDragOver(event)"
               ondragleave="handleDragLeave(event)"
               ondrop="handleDrop(event, 'dialogueInput')"
-              placeholder="Enter English dialogue here, or upload/drop a file (.pdf, .docx, .txt, .json)...&#10;&#10;ARJUN&#10;I told you not to come here. Why didn't you listen to me?"></textarea>
+              placeholder="Select a character from the dropdown above to display their dialogues (including non-standard Tenglish/Hinglish), or paste custom dialogue..."></textarea>
           </div>
           <div class="panel-actions mt-12">
             <button class="btn-primary full-width" onclick="convertLanguage()" id="langConvertBtn">
-              <span class="btn-icon">🔄</span> Convert Dialogue
+              <span class="btn-icon">🔄</span> Detect & Convert to Standard Language
             </button>
             <button type="button" class="btn-secondary full-width mt-8" onclick="loadSample('dialogue', 'dialogueInput')">💡 Load Sample Dialogue</button>
           </div>
@@ -280,10 +310,13 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
           <div class="panel">
             <div class="panel-header">
               <h2 class="panel-title">Story or Screenplay</h2>
-              <label class="btn-file-sm" title="Upload story or screenplay from PDF, DOCX, TXT, JSON">
-                📁 Upload File
-                <input type="file" class="hidden-input" accept=".pdf,.docx,.doc,.txt,.json,.md,.fountain" onchange="uploadAndFill(this, 'bibleInput')" />
-              </label>
+              <div class="action-row">
+                <button type="button" class="btn-sm btn-ghost" onclick="loadMergedScriptInto('bibleInput')">📥 Use Merged Script</button>
+                <label class="btn-file-sm" title="Upload story or screenplay from PDF, DOCX, TXT, JSON">
+                  📁 Upload File
+                  <input type="file" class="hidden-input" accept=".pdf,.docx,.doc,.txt,.json,.md,.fountain" onchange="uploadAndFill(this, 'bibleInput')" />
+                </label>
+              </div>
             </div>
             <textarea id="bibleInput" class="form-textarea tall"
               ondragover="handleDragOver(event)"
@@ -367,10 +400,13 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">Screenplay to Diagnose</h2>
-            <label class="btn-file-sm" title="Upload screenplay from PDF, DOCX, TXT, JSON">
-              📁 Upload File
-              <input type="file" class="hidden-input" accept=".pdf,.docx,.doc,.txt,.json,.md,.fountain" onchange="uploadAndFill(this, 'doctorInput')" />
-            </label>
+            <div class="action-row">
+              <button type="button" class="btn-sm btn-ghost" onclick="loadMergedScriptInto('doctorInput')">📥 Use Merged Script</button>
+              <label class="btn-file-sm" title="Upload screenplay from PDF, DOCX, TXT, JSON">
+                📁 Upload File
+                <input type="file" class="hidden-input" accept=".pdf,.docx,.doc,.txt,.json,.md,.fountain" onchange="uploadAndFill(this, 'doctorInput')" />
+              </label>
+            </div>
           </div>
           <textarea id="doctorInput" class="screenplay-textarea"
             ondragover="handleDragOver(event)"
@@ -435,10 +471,13 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">Screenplay</h2>
-            <label class="btn-file-sm" title="Upload screenplay from PDF, DOCX, TXT, JSON">
-              📁 Upload File
-              <input type="file" class="hidden-input" accept=".pdf,.docx,.doc,.txt,.json,.md,.fountain" onchange="uploadAndFill(this, 'coverageInput')" />
-            </label>
+            <div class="action-row">
+              <button type="button" class="btn-sm btn-ghost" onclick="loadMergedScriptInto('coverageInput')">📥 Use Merged Script</button>
+              <label class="btn-file-sm" title="Upload screenplay from PDF, DOCX, TXT, JSON">
+                📁 Upload File
+                <input type="file" class="hidden-input" accept=".pdf,.docx,.doc,.txt,.json,.md,.fountain" onchange="uploadAndFill(this, 'coverageInput')" />
+              </label>
+            </div>
           </div>
           <textarea id="coverageInput" class="screenplay-textarea"
             ondragover="handleDragOver(event)"
@@ -492,6 +531,10 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
           <h2 class="modal-title">🎬 Final Screenplay View</h2>
         </div>
         <div class="modal-actions">
+          <div class="view-mode-toggle" id="finalViewToggle">
+            <button type="button" class="btn-sm active" id="btnScriptView" onclick="setScreenplayViewMode('script')">📜 Script Align</button>
+            <button type="button" class="btn-sm" id="btnPlainView" onclick="setScreenplayViewMode('plain')">📄 Plain Text</button>
+          </div>
           <button type="button" class="btn-sm" onclick="copyOutput('finalScriptContent')">📋 Copy Script</button>
           <button type="button" class="btn-sm" onclick="downloadText('finalScriptContent', 'final_screenplay.txt')">⬇ Download</button>
           <button type="button" class="btn-sm btn-print" onclick="printFinalScreenplay()">🖨️ Print / PDF</button>
@@ -502,10 +545,12 @@ Example: Arjun, a 24-year-old software engineer in Hyderabad, discovers his late
         <span>📄 Estimated Pages: <strong id="metaPages">0</strong></span>
         <span>⏱️ Est. Screen Time: <strong id="metaRuntime">~0 mins</strong></span>
         <span>📝 Word Count: <strong id="metaWords">0</strong></span>
-        <span>🎯 Industry Standard Format</span>
+        <span>🎯 Industry Standard Script Alignment</span>
       </div>
       <div class="modal-body">
-        <pre class="screenplay-master-text" id="finalScriptContent"></pre>
+        <div class="screenplay-master-wrap" id="finalScriptWrap">
+          <div class="screenplay-master-text" id="finalScriptContent"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-secondary" onclick="sendFinalTo('doctor')">🩺 Send to Script Doctor</button>

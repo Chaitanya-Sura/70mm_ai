@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 from dotenv import load_dotenv
 from google import genai
 from flask import Flask, request, jsonify, send_from_directory
@@ -206,17 +207,57 @@ def language_convert():
     data = request.json
     api_key = data.get("api_key", "")
     dialogue = data.get("dialogue", "")
-    target_lang = data.get("target_lang", "Tenglish")
-    character_name = data.get("character_name", "")
+    target_lang = data.get("target_lang", "Standard English")
+    character_name = data.get("character_name", "") or "Selected Character / Narrator"
     personality = data.get("character_personality", "")
 
-    example = ""
-    if target_lang == "Tenglish":
-        example = "Example: 'Where were you last night?' becomes 'Nuvvu last night ekkada unnava?'"
-    elif target_lang == "Hinglish":
-        example = "Example: 'Where were you last night?' becomes 'Tum kal raat kahaan the?'"
+    if target_lang in ["Standard English", "English", "Standard"]:
+        prompt = f"""You are a professional film dialogue supervisor and NLP language analyst.
+Analyze the following lines for character '{character_name}' (or scene action/narrator lines).
 
-    prompt = f"""Convert this dialogue to {target_lang} using natural code-switching (NOT word-for-word translation).
+Tasks:
+1. DETECT NON-STANDARD ELEMENTS:
+   Identify all lines, phrases, or slang that are NON-STANDARD (such as Tenglish, Hinglish, regional Telugu/Hindi slang, colloquial code-switching, broken phrasing, or non-standard grammar).
+2. CONVERT TO STANDARD ENGLISH:
+   Translate and adapt every non-standard dialogue line into natural, cinematic, and fluent STANDARD ENGLISH, preserving the character's emotional intensity, dramatic subtext, and pacing.
+3. Keep lines that are already standard English cleanly integrated.
+
+Input Text:
+{dialogue}
+
+Please structure your response clearly:
+### 🔍 Detected Non-Standard Expressions
+(Bullet points listing each detected non-standard term or code-switched phrase, its regional language origin, and what it means)
+
+### ✍️ Converted Standard English Screenplay Dialogues
+(The complete dialogue formatted cleanly with character name and standard English lines ready for screenplay use)"""
+
+    elif target_lang in ["Standard Telugu", "Standard Hindi"]:
+        target_name = "Telugu" if "Telugu" in target_lang else "Hindi"
+        prompt = f"""You are a professional film dialogue writer specializing in {target_name}.
+Analyze the following dialogue for character '{character_name}'.
+
+Tasks:
+1. Detect any non-standard code-switched words, slang, or irregular phrasing (Tenglish/Hinglish/colloquialisms).
+2. Convert all lines into polished STANDARD {target_name.upper()} (include standard script and Roman transliteration).
+3. Preserve the character's original emotion and intent.
+
+Original Text:
+{dialogue}
+
+Please provide:
+### 🔍 Detected Non-Standard Expressions
+### ✍️ Converted Standard {target_name} Dialogues"""
+
+    else:
+        # Tenglish or Hinglish code-switching
+        example = ""
+        if target_lang == "Tenglish":
+            example = "Example: 'Where were you last night?' becomes 'Nuvvu last night ekkada unnava?'"
+        elif target_lang == "Hinglish":
+            example = "Example: 'Where were you last night?' becomes 'Tum kal raat kahaan the?'"
+
+        prompt = f"""Convert this dialogue to {target_lang} using natural, authentic code-switching (NOT word-for-word translation).
 
 Character: {character_name}
 Personality: {personality}
@@ -339,11 +380,14 @@ Identify and diagnose ALL issues in these categories:
 11. UNREALISTIC BEHAVIOUR - illogical character decisions
 12. GENRE VIOLATIONS - elements that break genre expectations
 
-For each issue found, provide:
-Scene/Location | Problem | Diagnosis | Recommendation | Optional Rewrite
+For each issue found, format the analysis in a clean Markdown table:
+| Scene / Location | Problem | Diagnosis | Recommendation | Optional Rewrite |
+| :--- | :--- | :--- | :--- | :--- |
 
-End with:
-**Script Health Score** overall and per category (1-10)
+End with a Script Health Score table:
+| Category | Score (1-10) | Diagnostic Verdict |
+| :--- | :---: | :--- |
+Followed by the overall Health Score and concluding Script Doctor advice.
 
 Screenplay to diagnose:
 {screenplay}"""
@@ -421,6 +465,10 @@ def continue_scene():
     api_key = data.get("api_key", "")
     screenplay = data.get("screenplay", "")
     language = data.get("language", "English")
+    directive = (data.get("directive") or data.get("instruction") or "").strip()
+
+    # Strip trailing FADE OUT / CUT TO so AI continues naturally without thinking the story has concluded
+    clean_screenplay = re.sub(r'(?i)\n+\s*(?:FADE\s+OUT\.?|CUT\s+TO:?)\s*$', '', screenplay.strip())
 
     lang_note = ""
     if language == "Tenglish":
@@ -428,19 +476,34 @@ def continue_scene():
     elif language == "Hinglish":
         lang_note = "Continue with dialogue in Hinglish."
 
-    prompt = f"""You are a professional screenwriter. Continue this screenplay from where it ends.
+    directive_section = ""
+    if directive:
+        directive_section = f"""
+SPECIFIC SCENE DIRECTIVE / INSTRUCTION TO FOLLOW:
+"{directive}"
+Ensure this continued scene incorporates and strictly follows this specific direction, tone, or action while staying true to the previous narrative context."""
+
+    prompt = f"""You are a professional screenwriter. Continue this screenplay seamlessly from where it ends.
 Maintain the same style, tone, character voices, and story direction.
 Add at least one complete, well-developed scene.
+
+Rules:
+- Do NOT begin with 'FADE IN:' (the screenplay is already in progress).
+- Begin directly with the next scene slugline (INT./EXT. LOCATION - TIME) or immediate action description.
+- Do NOT end with 'FADE OUT.' unless this is explicitly the final conclusion of the story.
 {lang_note}
+{directive_section}
 
 Screenplay so far:
-{screenplay}
+{clean_screenplay}
 
 [CONTINUE SCREENPLAY HERE]"""
 
     try:
         result = call_gemini(api_key, prompt)
-        return jsonify({"success": True, "result": result})
+        # Strip redundant leading FADE IN: from the generated continuation if present
+        result = re.sub(r'(?i)^\s*FADE\s+IN\s*:\s*\n*', '', result.strip())
+        return jsonify({"success": True, "result": result, "directive_applied": directive})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
